@@ -279,7 +279,10 @@ struct
 
 
   (*  computeLL (keyws, d, wps) = the log-likelihood of the document d
-  *   being produced by the model wps.  See assignment description for details.
+  *   being produced by the model wps.
+  *   = log(Pr[d|c]) = Sum for every w in K of (Nd(w)*log(Mc(w)))
+  *       where Nd(w) = number of times w appears in d
+  *             Mc(w) = cps(c)(w)
   *   (string list, doc, wordprobs) -> real
   *)
   fun computeLL (keyws : string list, d : doc, wps : wordprobs) : real =
