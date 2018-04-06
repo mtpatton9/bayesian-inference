@@ -1,0 +1,350 @@
+structure Bayes =
+struct
+
+  (*  Naming conventions.  I found it useful to consistently use the same names
+  *   for the same types of values:
+  *   - c : category
+  *   - d : doc
+  *   - ccs : ctycounts
+  *   - wcs : wordcounts
+  *   - wps : wordprobs
+  *   - keyws : string list (list of keywords)
+  *)
+
+  type category = string
+  type doc = string list
+
+  (*  Think of a value wcs : wordcounts as a function from strings to ints.
+  *   If wcs = [(s_0, i_0),...,(s_n, i_n)], then the value wcs on string s
+  *   is computed as follows:
+  *   - if s = s_j, then the value is i_j
+  *   - if s <> s_j for any j, then the value is undefined.
+  *   In the documentation below, we will write wcs(s) for the value of wcs
+  *   on string s.
+  *
+  *   Think of each of the list types below in the same way.
+  *)
+  type wordcounts = (string*int) list
+
+  (*  The type of functions from categories to wordcounts.
+  *)
+  type ctycounts = (category*wordcounts) list
+
+
+
+  (* lookup (cs, c) = true if c is in cs, false if c not in cs
+  * (category list, category) -> bool
+  *)
+  fun lookup(cs : (category)list, c : category) : bool =
+    case cs of
+      []=> false
+     | c':: cs' => if c = c' then true else lookup(cs', c)
+
+
+  (* initWordset (keyws) = [(w0, 0), (w1, 0),..., (wn, 0)]
+  * where w is a string in keyws
+  * Creates a wordcounts with every string in keyws paired with 0
+  * string list -> wordcounts
+  *)
+  fun initWordset (keyws : string list) : wordcounts=
+    case keyws of
+      []=> []
+     |w :: keyws' => (w, 0)::initWordset(keyws')
+           
+
+  (* initCs (cds) = [c0, c1,... cn]
+  * where cds = [(c0, d0), (c1, d1),..., (cn, dn)]
+  * contains duplicates
+  * (category*doc) list -> category list
+  *)
+  fun initCs (cds : (category*doc) list) : category list =
+    case cds of
+         []=> []
+       |(c, d):: cds' => c::initCs(cds')
+
+
+  (* initCsNoDups (cs) = the same list of cs, removing any identical c
+  * so that ci != cj when c != j
+  * no duplicates
+  * category list -> category list
+  *)
+  fun initCsNoDups (cs : category list) : category list = 
+    case cs of
+         []=>[]
+       |c :: cs' =>
+           let
+             val zs : category list = initCsNoDups(cs')
+           in
+              if lookup(zs, c) then zs
+              else c::zs
+           end
+
+
+  (* initCtycounts(cs, wcs) = [(c0, wcs), (c1, wcs),...,(cn, wcs)]
+  * makes a ctycounts from a category list and a wordcounts
+  * (category list, wordcounts) -> ctycounts
+  *)
+  fun initCtycounts(cs : category list, wcs : wordcounts) : ctycounts=
+    case cs of
+      []=> []
+     |c :: cs' => (c, wcs):: initCtycounts(cs', wcs)
+ 
+
+  (*getCtyCounts(ccs, c) = wcs, where wcs is the wordcount value corresp. to c
+  * in ccs
+  *(ctycounts, category) -> wordcounts
+  *)
+  fun getCtyCounts(ccs : ctycounts, c : category) : wordcounts =
+    case ccs of
+      []=> []
+     |(c', wcs') :: ccs' =>
+         if c'= c then wcs' else getCtyCounts(ccs', c)
+         (*if the c matches the first cat, then return the corresp. wordcounts
+         * else run again without that first category
+         *)
+
+
+  (* updCtyCounts(ccs, c, wcs) = ccs'
+  * finds ccs(c)= wcs, replaces wcs with wcs'
+  * so that ccs'(c)= wcs'. Otherwise, ccs = ccs'
+  * (ctycounts, category, wordcounts) -> ctycounts
+  *)
+  fun updCtyCounts(ccs : ctycounts, c : category, wcs: wordcounts) : ctycounts = 
+    case ccs of
+      [] => []
+     |(c', wcs') :: ccs' =>
+         if c'=c then (c, wcs)::ccs' else (c', wcs')::updCtyCounts(ccs', c, wcs)
+         (*if first c matches the first category,
+         * then swap wcs' with wcs from the arguments, 
+         * recons (c, wcs) with the tail
+         * else, run again without that first category
+         *)
+
+
+  (* incrCount(wcs, w) = wcs' where wcs'(w)= 1+wcs(w)
+  * otherwise, wcs' = wcs
+  * (wordcounts, string) -> wordcounts
+  *)
+  fun incrCount(wcs: wordcounts, w : string) : wordcounts =
+    case wcs of
+         [] => []
+       |(w', n'):: wcs' =>
+           if w = w' then (w', n'+1)::incrCount(wcs', w)
+           else (w', n'):: incrCount(wcs', w)
+    
+
+  (* countWordsInDoc(wcs, d) = wcs' where wcs'(w) = n,
+  * and n= the number of occurrences of w in d
+  * (wordcounts, doc) -> wordcounts
+  *)
+  fun countWordsInDoc(wcs : wordcounts, d: doc): wordcounts = 
+    case d of
+      []=>  wcs
+       |w:: ws => (*recursing on strings in the doc*)
+           let
+             val zs : wordcounts = countWordsInDoc(wcs, ws)
+             (*^wordcounts of remaining words*)
+           in
+             incrCount(zs, w)
+           end
+
+
+  (* countPerCategory((c,d), ccs) = ccs', where ccs'(c) is ccs(c) with
+  * the information/ occurrences of strings in d added in
+  * updates a wordcounts in a ctycounts after counting everything in (c, d)
+  * ((category*doc), ctycounts)-> ctycounts
+  *)
+  fun countPerCategory((c, d) : (category*doc), ccs : ctycounts) : ctycounts =
+  let
+    val wcs : wordcounts = getCtyCounts(ccs, c)
+    (*^= current wordcounts for the c, before any new counting*)
+    val wcs' : wordcounts = countWordsInDoc(wcs, d) (*accurate wcs after d is
+    tallied*)
+  in
+    updCtyCounts(ccs, c, wcs')
+  end
+
+
+  (* countCDs(cds, ccs)= ccs' where ccs'(c) = ccs(c) with the information from
+  * the corresponding d, for all cs in cds.
+  * goes through every (c, d), counts for every (c,d), updates ctycounts
+  * each time
+  * ((category*doc) list, ctycounts) -> ctycounts
+  *)
+  fun countCDs(cds : (category*doc) list, ccs : ctycounts): ctycounts =
+    case cds of
+         []=> ccs
+       |(c, d) :: cds' =>
+           let
+             val ccs' : ctycounts = countPerCategory((c, d), ccs)
+             (*^ =updated ctycounts having tallied (c, d) information*)
+           in
+             countCDs(cds', ccs')
+           end
+
+
+
+  (*  A type of functions from strings to reals.
+  *)
+  type wordprobs = (string*real) list
+
+  (*  A type of functions from categories to wordprobs.
+  *)
+  type ctyprobs = (category*wordprobs) list
+
+  (*  count (keyws, cds) = ccs, where ccs(c) is the word count for all documents
+  *   in cds with category c.
+  *)
+  fun count (keyws : string list, cds : (category*doc) list) : ctycounts =
+  let
+    val ws0 : wordcounts = initWordset(keyws)
+    val cs0 : category list = initCs(cds)
+    val cs1 : category list = initCsNoDups(cs0)
+    val ccs0 : ctycounts = initCtycounts(cs1, ws0)
+  in
+    countCDs(cds, ccs0)
+  end
+
+
+  (* getSumCat(wcs) = sum of wcs(w) for all w
+  * sums all n's of (w,n) in a wordcounts
+  * wcs -> int
+  *)
+  fun getSumCat(wcs) : int =
+    case wcs of
+         []=>0
+       |(w, n):: wcs' => n + getSumCat(wcs')
+
+
+  (* getSumTotal(ccs) = sum of all ccs(wcs)(w) for all wcs, all ws
+  * finds total number of words in a ctycounts
+  * ctycounts -> int
+  *)
+  fun getSumTotal(ccs : ctycounts): int=
+    case ccs of
+         []=> 0
+       |(c, wcs):: ccs' =>
+           let
+             val zs : int = getSumTotal(ccs') (*sum of all words in all other
+             wcs*)
+             val n : int = getSumCat(wcs) (*sum of all words in this wcs*)
+           in
+             n + zs
+           end
+
+
+  (* convertToWps(wcs, sum) = wps, where wps(w)= wcs(w)/sum
+  * converts wcs to wps by dividing wcs(w)=n for all w by sum
+  * if wcs(w)=0, to avoid complications wps(w)=1/sum
+  * (wordcounts, real)-> wordprobs
+  *)
+  fun convertToWps(wcs : wordcounts, sum : real): wordprobs =
+    case wcs of
+         []=> [] (*conversion of nothing is nothing*)
+       |(w, n)::wcs' =>
+           let
+             val zs : wordprobs = convertToWps(wcs', sum) (*[(w1, p1), ... (wi,
+             pi)] *)
+             val p : real =
+               if n=0 then 1.0/sum else real(n)/sum
+           in
+             (w, p):: zs
+           end
+
+
+  (*  makeCtyProbs ccs = cps, where cps(c) = makeWordProbs(ccs(c))
+  *  ctycounts -> ctyprobs
+  *)
+  fun makeCtyProbs(ccs : ctycounts) : ctyprobs =
+    case ccs of
+         []=>[] (*there are no categories, so ctyprobs is empty too*)
+       |(c, wcs):: ccs' =>
+           let
+             val zs : ctyprobs = makeCtyProbs(ccs')(*[(c1, wp1),...,(cn,wpn)]*)
+             val sum : real = real(getSumCat(wcs))
+             val wps : wordprobs = convertToWps(wcs, sum)
+           in
+             (c, wps) :: zs
+           end
+                        
+
+  (* getNd(d, w) = Nd(w) = number of times w appears in d
+  * (doc, string) -> int
+  *)
+  fun getNd(d: doc, w: string) : int=
+    case d of
+         []=> 0
+       |w':: ws => if w'=w then 1+ getNd(ws, w) else getNd(ws, w) 
+    
+
+
+  (*  computeLL (keyws, d, wps) = the log-likelihood of the document d
+  *   being produced by the model wps.  See assignment description for details.
+  *   (string list, doc, wordprobs) -> real
+  *)
+  fun computeLL (keyws : string list, d : doc, wps : wordprobs) : real =
+    case wps of
+         []=> 0.0
+       |(w, prob):: wps' =>
+           let
+             val zs : real = computeLL(keyws, d, wps') (*sum of all other
+             logged probabilities*)
+             val nd : real = real(getNd(d, w))
+             val logProb : real = nd * Math.log10(prob)
+           in
+             logProb + zs
+           end
+
+  (* getProbs(cps, c) = cps(c) = wps
+  * (ctyprobs, category)-> wordprobs
+  *)
+  fun getProbs (cps : ctyprobs, c : category) : wordprobs =
+    case cps of
+         []=> []
+       |(c', wps'):: cps' =>
+           if c'=c then wps' else getProbs(cps', c)
+
+
+  (* gatherLLs (keyws, d, cps) = list of (c, computeLL(keyws, d, cps(w))
+  * pairs each c from cps with the probability that d belongs in it,
+  * as computed by computeLL
+  * (string list, doc, ctyprobs) -> category*real list
+  *)
+  fun gatherLLs(keyws :string list, d :doc, cps : ctyprobs):
+    (category*real) list=
+    case cps of
+         []=> []
+       |(c, wps):: cps' =>
+           let
+             val zs : (category*real) list = gatherLLs(keyws, d, cps')
+             val r : real = computeLL(keyws, d, wps)
+           in
+             (c, r):: zs
+           end
+
+
+  (*  makeClassifier (keyws, cds) = cl, where cl(d) = [...,(c, r),...],
+  *   where the list ranges over pairs (c, r) such that c is a category
+  *   in cds and r is the log-likelihood that the document d is produced
+  *   by the model computed from c.
+  *)
+  fun makeClassifier (
+      keyws : string list, 
+      cds : (category*doc) list,
+      d : doc) : (category*real) list =
+
+      case cds of
+           []=> []
+         |(c, _):: cds' =>
+             let
+               val zs : (category*real) list = makeClassifier(keyws, cds', d)
+               val cps : ctyprobs = makeCtyProbs(count(keyws, cds))
+               val wps : wordprobs = getProbs(cps, c)
+               val r : real = computeLL(keyws, d, wps)
+             in
+               (c, r):: zs
+             end
+
+
+end
+
